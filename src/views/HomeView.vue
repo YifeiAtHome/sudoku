@@ -1,74 +1,113 @@
 <template>
-  <main>
-    <div v-if="loading">加载中...</div>
-    <div v-else>
-      <table class="sudoku-board">
-        <tbody>
-          <tr v-for="(row, rowIndex) in userBoard" :key="rowIndex">
-            <td
-              v-for="(cell, colIndex) in row"
-              :key="colIndex"
-              :class="{
-                'highlight-checking': highlightCells[rowIndex]?.[colIndex] > 0,
-                error: errorCells[rowIndex][colIndex],
-                'highlight-active':
-                  activeCell && isInSameGroup(rowIndex, colIndex, activeCell.row, activeCell.col),
-              }"
-              :style="{ '--highlight-level': highlightCells[rowIndex]?.[colIndex] * 0.3 + 0.1 }"
-            >
-              <template v-if="originBoard[rowIndex][colIndex] === 0">
-                <div class="possible-values">
-                  <span
-                    v-for="v in Array.from(possibleValues[rowIndex]?.[colIndex] ?? [])"
-                    :key="v"
-                    class="pv"
-                    >{{ v }}</span
+  <main style="display: flex; flex-direction: row">
+    <!-- Step 历史列表 -->
+    <aside
+      style="
+        width: 120px;
+        border-right: 1px solid #eee;
+        padding: 8px 0;
+        max-height: 315px;
+        overflow-y: auto;
+      "
+    >
+      <div
+        v-for="(step, idx) in moveHistory"
+        :key="idx"
+        :style="{
+          padding: '6px 12px',
+          cursor: 'pointer',
+          background: idx === moveIndex ? '#e3f2fd' : 'transparent',
+          fontWeight: idx === moveIndex ? 'bold' : 'normal',
+        }"
+        @click="jumpToStep(idx)"
+      >
+        Step {{ idx }}
+      </div>
+    </aside>
+    <!-- 主体 -->
+    <div style="flex: 1; padding-left: 24px">
+      <div v-if="loading">加载中...</div>
+      <div v-else>
+        <table class="sudoku-board">
+          <tbody>
+            <tr v-for="(row, rowIndex) in userBoard" :key="rowIndex">
+              <td
+                v-for="(cell, colIndex) in row"
+                :key="colIndex"
+                :class="{
+                  'highlight-checking': highlightCells[rowIndex]?.[colIndex] > 0,
+                  error: errorCells[rowIndex][colIndex],
+                  'highlight-active':
+                    activeCell && isInSameGroup(rowIndex, colIndex, activeCell.row, activeCell.col),
+                  'highlight-active-center':
+                    activeCell && rowIndex === activeCell.row && colIndex === activeCell.col,
+                }"
+                :style="{
+                  '--highlight-level': highlightCells[rowIndex]?.[colIndex] * 0.3 + 0.1,
+                }"
+              >
+                <template v-if="originBoard[rowIndex][colIndex] === 0">
+                  <template
+                    v-if="
+                      possibleValues[rowIndex]?.[colIndex]?.size === 1 &&
+                      !userBoard[rowIndex][colIndex]
+                    "
                   >
-                </div>
-                <template
-                  v-if="
-                    possibleValues[rowIndex]?.[colIndex]?.size === 1 &&
-                    !userBoard[rowIndex][colIndex]
-                  "
-                >
-                  <button
-                    class="unique-btn"
-                    @click="onFillUnique(rowIndex, colIndex)"
-                    style="width: 100%; height: 100%; font-size: 16px"
+                    <button class="unique-btn" @click="onFillUnique(rowIndex, colIndex)">
+                      {{ Array.from(possibleValues[rowIndex][colIndex])[0] }}
+                    </button>
+                  </template>
+
+                  <template
+                    v-else-if="
+                      possibleValues[rowIndex]?.[colIndex]?.size === 0 &&
+                      !userBoard[rowIndex][colIndex]
+                    "
                   >
-                    {{ Array.from(possibleValues[rowIndex][colIndex])[0] }}
-                  </button>
+                    <span>🚫</span>
+                  </template>
+                  <template v-else>
+                    <div class="possible-values" v-if="!userInput[rowIndex][colIndex]">
+                      <span
+                        v-for="v in Array.from(possibleValues[rowIndex]?.[colIndex] ?? [])"
+                        :key="v"
+                        class="pv"
+                        >{{ v }}</span
+                      >
+                    </div>
+                    <input
+                      type="text"
+                      maxlength="1"
+                      v-model="userInput[rowIndex][colIndex]"
+                      @input="onInput(rowIndex, colIndex)"
+                      @focus="onFocus(rowIndex, colIndex)"
+                      @blur="onBlur"
+                      :readonly="userInput[rowIndex][colIndex] !== ''"
+                      :disabled="userInput[rowIndex][colIndex] !== ''"
+                      :class="{ error: errorCells[rowIndex][colIndex] }"
+                    />
+                  </template>
                 </template>
-                <template v-else>
-                  <input
-                    type="text"
-                    maxlength="1"
-                    v-model="userInput[rowIndex][colIndex]"
-                    @input="onInput(rowIndex, colIndex)"
-                    @focus="onFocus(rowIndex, colIndex)"
-                    @blur="onBlur"
-                    :class="{ error: errorCells[rowIndex][colIndex] }"
-                  />
-                </template>
-              </template>
-              <span v-else>{{ originBoard[rowIndex][colIndex] }}</span>
-            </td>
-          </tr>
-        </tbody>
-      </table>
-      <div style="margin: 16px 0; display: flex; gap: 8px">
-        <div style="display: flex; align-items: center; gap: 4px">
-          <input type="checkbox" id="combo" v-model="combo" />
-          <label for="combo">Combo</label>
+                <span v-else>{{ originBoard[rowIndex][colIndex] }}</span>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <div style="margin: 16px 0; display: flex; gap: 8px">
+          <div style="display: flex; align-items: center; gap: 4px">
+            <input type="checkbox" id="combo" v-model="combo" />
+            <label for="combo">Combo</label>
+          </div>
+          <button v-if="hasError" @click="restoreMoveSnapshot">Reset</button>
+          <button v-if="waitingForNext" @click="onNext">Next</button>
         </div>
-        <button v-if="waitingForNext" @click="onNext">Next</button>
       </div>
     </div>
   </main>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed, watch } from 'vue'
 
 const loading = ref(true)
 const originBoard = ref<number[][]>([]) // 初始题面
@@ -78,10 +117,17 @@ const errorCells = ref<boolean[][]>([]) // 标记错误格子
 const possibleValues = ref<Set<number>[][]>([]) // 可能的值
 const highlightCells = ref<number[][]>([]) // 由 HIGHLIGHT[][] 改为 number[][]，表示高亮层数
 const activeCell = ref<{ row: number; col: number } | null>(null)
-let checkTask: number | null = null
 const waitingForNext = ref(false)
 const nextResolvers: (() => void)[] = []
 const combo = ref(true)
+const moveHistory = ref<
+  {
+    userBoard: number[][]
+    userInput: string[][]
+    errorCells: boolean[][]
+  }[]
+>([])
+const moveIndex = ref(-1)
 
 function updatePossibleValues() {
   const newPossible: Set<number>[][] = Array.from({ length: 9 }, (_, row) =>
@@ -176,13 +222,16 @@ function onNext() {
   }
 }
 
+const checkTask = ref<string[]>([])
 async function asyncCheck(centerRow: number, centerCol: number, val: number) {
   // 检查给 [centerRow, centerCol] 的格子赋值 val 是否冲突
   console.log('asyncCheck', centerRow, centerCol, val)
-  if (checkTask !== null) {
-    clearTimeout(checkTask)
-    checkTask = null
+  const key = `${centerRow}-${centerCol}-${val}`
+  if (checkTask.value.includes(key)) {
+    return
   }
+  checkTask.value.push(key)
+
   const visited = Array.from({ length: 9 }, () => Array(9).fill(false))
   const thisCheckCells: [number, number][] = [] // 记录本次检查过的格子
 
@@ -268,15 +317,48 @@ async function asyncCheck(centerRow: number, centerCol: number, val: number) {
       checkCell(r, c)
     }
     await new Promise((resolve) => setTimeout(resolve, 150))
+    if (hasError.value) {
+      break
+    }
     // await waitForNext()
   }
   // 检查结束后，把本次高亮的格子层数-1
   // for (const [r, c] of thisCheckCells) {
   //   highlightCells.value[r][c] = Math.max(0, (highlightCells.value[r][c] ?? 1) - 1)
   // }
+
+  checkTask.value = checkTask.value.filter((k) => k !== key)
 }
 
+watch(checkTask, (newVal) => {
+  if (newVal.length === 0 && !hasError.value) {
+    pushMoveSnapshot()
+  }
+})
+
+function restoreMoveSnapshot() {
+  if (moveIndex.value < 0) return
+  restoreMoveAt(moveIndex.value)
+}
+const hasError = computed(() => {
+  return errorCells.value.some((row) => row.some((e) => e))
+})
+const hasUniqueButton = computed(() => {
+  for (let r = 0; r < 9; r++) {
+    for (let c = 0; c < 9; c++) {
+      if (
+        originBoard.value[r][c] === 0 &&
+        !userBoard.value[r][c] &&
+        possibleValues.value[r][c]?.size === 1
+      ) {
+        return true
+      }
+    }
+  }
+  return false
+})
 function onInput(row: number, col: number) {
+  console.log('onInput', row, col, userInput.value[row][col])
   const val = userInput.value[row][col]
   if (!/^[1-9]$/.test(val)) {
     userInput.value[row][col] = ''
@@ -286,6 +368,7 @@ function onInput(row: number, col: number) {
     updatePossibleValues()
     return
   }
+  moveHistory.value = moveHistory.value.slice(0, moveIndex.value + 1)
   activeCell.value = null
   userBoard.value[row][col] = parseInt(val)
   asyncCheck(row, col, parseInt(val))
@@ -300,11 +383,48 @@ function onBlur() {
 }
 
 function onFillUnique(row: number, col: number) {
+  if (hasError.value) {
+    return
+  }
+  moveHistory.value = moveHistory.value.slice(0, moveIndex.value + 1)
   // 取唯一解
   const val = Array.from(possibleValues.value[row][col])[0]
   userInput.value[row][col] = String(val)
   userBoard.value[row][col] = val
   asyncCheck(row, col, val)
+}
+
+function pushMoveSnapshot() {
+  console.log('pushMoveSnapshot', moveIndex.value)
+  if (moveIndex.value < moveHistory.value.length - 1) {
+    moveHistory.value = moveHistory.value.slice(0, moveIndex.value + 1)
+  }
+  moveHistory.value.push({
+    userBoard: userBoard.value.map((row) => [...row]),
+    userInput: userInput.value.map((row) => [...row]),
+    errorCells: errorCells.value.map((row) => [...row]),
+  })
+  moveIndex.value++
+}
+
+function restoreMoveAt(index: number) {
+  if (index < 0 || index >= moveHistory.value.length) return
+  const snap = moveHistory.value[index]
+  userBoard.value = snap.userBoard.map((row) => [...row])
+  userInput.value = snap.userInput.map((row) => [...row])
+  errorCells.value = snap.errorCells.map((row) => [...row])
+  updatePossibleValues()
+  moveIndex.value = index
+}
+function undo() {
+  if (moveIndex.value > 0) {
+    restoreMoveAt(moveIndex.value - 1)
+  }
+}
+function redo() {
+  if (moveIndex.value < moveHistory.value.length - 1) {
+    restoreMoveAt(moveIndex.value + 1)
+  }
 }
 
 function initBoards(puzzle: number[][]) {
@@ -314,6 +434,13 @@ function initBoards(puzzle: number[][]) {
   errorCells.value = puzzle.map((row) => row.map(() => false))
   highlightCells.value = Array.from({ length: 9 }, () => Array(9).fill(0))
   updatePossibleValues()
+  moveHistory.value = []
+  moveIndex.value = -1
+  pushMoveSnapshot()
+}
+
+function jumpToStep(idx: number) {
+  restoreMoveAt(idx)
 }
 
 onMounted(async () => {
@@ -329,7 +456,7 @@ onMounted(async () => {
     mission: '090002070000003006001960080400000010000006000030750008000200000070890005003000700',
     solution: '396582174548173296721964583465328917987416352132759468659237841274891635813645729',
   }
-  const board = easy.mission
+  const board = extereme.mission
     .split('')
     .map((item) => parseInt(item))
     .reduce((acc, item, index) => {
@@ -351,11 +478,14 @@ onMounted(async () => {
 <style lang="less" scoped>
 .sudoku-board {
   border-collapse: collapse;
+  max-width: 434px;
+  min-width: 434px;
+  font-size: 20px;
 }
 .sudoku-board td {
   border: 1px solid #aaa;
-  width: 32px;
-  height: 32px;
+  width: 48px;
+  height: 48px;
   text-align: center;
   padding: 0;
   position: relative;
@@ -371,6 +501,9 @@ onMounted(async () => {
   background: transparent;
   color: #1976d2;
   font-weight: bold;
+  font-size: 24px;
+  font-family: 'Courier New', Courier, monospace;
+  caret-color: transparent;
 }
 .sudoku-board .error {
   background: #ffcccc !important;
@@ -381,18 +514,19 @@ onMounted(async () => {
   color: #333;
 }
 .possible-values {
-  font-size: 10px;
+  font-size: 11px;
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
+  align-items: center;
   min-height: 14px;
-  margin-top: 2px;
-  line-height: 1.2;
+  margin-top: 6px;
+  padding: 0 4px;
+  line-height: 1.4;
   position: absolute;
   top: 0;
   left: 0;
   width: 100%;
-  height: 100%;
   z-index: -1;
 
   span {
@@ -404,6 +538,20 @@ onMounted(async () => {
 }
 .sudoku-board td.highlight-active {
   background: #f0f0f0;
+}
+.sudoku-board td.highlight-active-center {
+  &:after {
+    content: '';
+    position: absolute;
+    --gap: 4px;
+    top: var(--gap);
+    left: var(--gap);
+    bottom: var(--gap);
+    right: var(--gap);
+    border: 1px solid #ccc;
+    z-index: -2;
+    background: white;
+  }
 }
 .sudoku-board td {
   position: relative;
@@ -452,6 +600,9 @@ onMounted(async () => {
   font-weight: bold;
   border-radius: 4px;
   transition: background 0.2s;
+  width: 70%;
+  height: 70%;
+  font-size: 18px;
   &:hover {
     background: #bbdefb;
   }
