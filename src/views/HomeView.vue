@@ -11,7 +11,7 @@
       "
     >
       <div
-        v-for="(step, idx) in moveHistory"
+        v-for="(step, idx) in moveHistoryList"
         :key="idx"
         :style="{
           padding: '6px 12px',
@@ -120,14 +120,6 @@ const activeCell = ref<{ row: number; col: number } | null>(null)
 const waitingForNext = ref(false)
 const nextResolvers: (() => void)[] = []
 const combo = ref(true)
-const moveHistory = ref<
-  {
-    userBoard: number[][]
-    userInput: string[][]
-    errorCells: boolean[][]
-  }[]
->([])
-const moveIndex = ref(-1)
 
 function updatePossibleValues() {
   const newPossible: Set<number>[][] = Array.from({ length: 9 }, (_, row) =>
@@ -338,7 +330,7 @@ watch(checkTask, (newVal) => {
 
 function restoreMoveSnapshot() {
   if (moveIndex.value < 0) return
-  restoreMoveAt(moveIndex.value)
+  restoreMove(currentMove.value!)
 }
 const hasError = computed(() => {
   return errorCells.value.some((row) => row.some((e) => e))
@@ -368,7 +360,6 @@ function onInput(row: number, col: number) {
     updatePossibleValues()
     return
   }
-  moveHistory.value = moveHistory.value.slice(0, moveIndex.value + 1)
   activeCell.value = null
   userBoard.value[row][col] = parseInt(val)
   asyncCheck(row, col, parseInt(val))
@@ -386,7 +377,6 @@ function onFillUnique(row: number, col: number) {
   if (hasError.value) {
     return
   }
-  moveHistory.value = moveHistory.value.slice(0, moveIndex.value + 1)
   // 取唯一解
   const val = Array.from(possibleValues.value[row][col])[0]
   userInput.value[row][col] = String(val)
@@ -394,36 +384,81 @@ function onFillUnique(row: number, col: number) {
   asyncCheck(row, col, val)
 }
 
-function pushMoveSnapshot() {
-  console.log('pushMoveSnapshot', moveIndex.value)
-  if (moveIndex.value < moveHistory.value.length - 1) {
-    moveHistory.value = moveHistory.value.slice(0, moveIndex.value + 1)
+type MoveNode = {
+  snapshot: {
+    userBoard: number[][]
+    userInput: string[][]
+    errorCells: boolean[][]
   }
-  moveHistory.value.push({
+  prev: MoveNode | null
+  next: MoveNode | null
+}
+const moveHead = ref<MoveNode | null>(null)
+const currentMove = ref<MoveNode | null>(null)
+const moveHistoryList = computed(() => {
+  const list: MoveNode[] = []
+  let node = moveHead.value
+  while (node) {
+    list.push(node)
+    node = node.next
+  }
+  return list
+})
+const moveIndex = computed(() => {
+  let idx = 0
+  let node = moveHead.value
+  while (node && node !== currentMove.value) {
+    node = node.next
+    idx++
+  }
+  return node ? idx : -1
+})
+function pushMoveSnapshot() {
+  const snapshot = {
     userBoard: userBoard.value.map((row) => [...row]),
     userInput: userInput.value.map((row) => [...row]),
     errorCells: errorCells.value.map((row) => [...row]),
-  })
-  moveIndex.value++
+  }
+  const newNode: MoveNode = {
+    snapshot,
+    prev: currentMove.value,
+    next: null,
+  }
+  if (currentMove.value) {
+    currentMove.value.next = newNode
+  } else {
+    moveHead.value = newNode
+  }
+  currentMove.value = newNode
 }
 
-function restoreMoveAt(index: number) {
-  if (index < 0 || index >= moveHistory.value.length) return
-  const snap = moveHistory.value[index]
-  userBoard.value = snap.userBoard.map((row) => [...row])
-  userInput.value = snap.userInput.map((row) => [...row])
-  errorCells.value = snap.errorCells.map((row) => [...row])
+function restoreMove(node: MoveNode) {
+  userBoard.value = node.snapshot.userBoard.map((row) => [...row])
+  userInput.value = node.snapshot.userInput.map((row) => [...row])
+  errorCells.value = node.snapshot.errorCells.map((row) => [...row])
   updatePossibleValues()
-  moveIndex.value = index
+  currentMove.value = node
 }
+
+function jumpToStep(idx: number) {
+  let node = moveHead.value
+  let i = 0
+  while (node && i < idx) {
+    node = node.next
+    i++
+  }
+  if (node) restoreMove(node)
+}
+
 function undo() {
-  if (moveIndex.value > 0) {
-    restoreMoveAt(moveIndex.value - 1)
+  if (currentMove.value && currentMove.value.prev) {
+    restoreMove(currentMove.value.prev)
   }
 }
+
 function redo() {
-  if (moveIndex.value < moveHistory.value.length - 1) {
-    restoreMoveAt(moveIndex.value + 1)
+  if (currentMove.value && currentMove.value.next) {
+    restoreMove(currentMove.value.next)
   }
 }
 
@@ -434,13 +469,10 @@ function initBoards(puzzle: number[][]) {
   errorCells.value = puzzle.map((row) => row.map(() => false))
   highlightCells.value = Array.from({ length: 9 }, () => Array(9).fill(0))
   updatePossibleValues()
-  moveHistory.value = []
-  moveIndex.value = -1
+  // 重置链表头和当前指针
+  moveHead.value = null
+  currentMove.value = null
   pushMoveSnapshot()
-}
-
-function jumpToStep(idx: number) {
-  restoreMoveAt(idx)
 }
 
 onMounted(async () => {
