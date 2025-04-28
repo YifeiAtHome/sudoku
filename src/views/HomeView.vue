@@ -6,22 +6,86 @@
         width: 120px;
         border-right: 1px solid #eee;
         padding: 8px 0;
-        max-height: 315px;
+        max-height: 500px;
         overflow-y: auto;
       "
     >
-      <div
-        v-for="(step, idx) in moveHistoryList"
-        :key="idx"
-        :style="{
-          padding: '6px 12px',
-          cursor: 'pointer',
-          background: idx === moveIndex ? '#e3f2fd' : 'transparent',
-          fontWeight: idx === moveIndex ? 'bold' : 'normal',
-        }"
-        @click="jumpToStep(idx)"
-      >
-        Step {{ idx }}
+      <div v-for="(node, idx) in mainChain" :key="idx" style="margin-bottom: 8px">
+        <div
+          :style="{
+            textAlign: 'center',
+            fontWeight: node === currentMove ? 'bold' : 'normal',
+            color: node === currentMove ? '#1976d2' : '#333',
+            background: node === currentMove ? '#e3f2fd' : 'transparent',
+            borderRadius: '4px',
+            padding: '2px 8px',
+            marginBottom: '2px',
+            cursor: 'pointer',
+            border: node === currentMove ? '1px solid #1976d2' : '1px solid transparent',
+            transition: 'background 0.2s, border 0.2s',
+          }"
+          @click="restoreMove(node)"
+        >
+          <span style="font-size: 12px; color: #aaa">
+            <template v-if="node.parent">
+              <span
+                v-if="node.children.length > 1 && node?.children?.[0]?.branchInfo"
+                :class="{ failed: node.status === 'failed', success: node.status === 'success' }"
+              >
+                Branch at [{{ node.children[0].branchInfo.row + 1 }},{{
+                  node.children[0].branchInfo.col + 1
+                }}]
+              </span>
+              <span
+                v-else
+                :class="{ failed: node.status === 'failed', success: node.status === 'success' }"
+              >
+                Step
+              </span>
+            </template>
+            <span v-else>{{ node.status === 'success' ? '🎉🎉🎉' : 'Start' }}</span>
+          </span>
+          <!-- 横向分支 -->
+          <div v-if="node.children.length > 1" style="display: flex; justify-content: center">
+            <div style="display: flex; flex-direction: row; gap: 2px; margin-left: 4px">
+              <div
+                v-for="(child, cidx) in node.children"
+                :key="cidx"
+                :class="{
+                  failed: child.status === 'failed',
+                  success: child.status === 'success',
+                }"
+                :style="{
+                  fontSize: '12px',
+                  color:
+                    child.status === 'failed'
+                      ? '#fa5151'
+                      : child.status === 'success'
+                        ? '#07c160'
+                        : mainChainSet.has(child)
+                          ? '#1976d2'
+                          : '#888',
+                  fontWeight: mainChainSet.has(child) ? 'bold' : 'normal',
+                  background: mainChainSet.has(child) ? '#e3f2fd' : 'transparent',
+                  borderRadius: '4px',
+                  padding: '0 4px',
+                  border: mainChainSet.has(child) ? '1px solid #1976d2' : '1px solid transparent',
+                  cursor: 'pointer',
+                  transition: 'background 0.2s, border 0.2s',
+                }"
+                @click.stop="restoreMove(child, true)"
+              >
+                {{ child.branchInfo ? child.branchInfo.value : '?' }}
+              </div>
+            </div>
+          </div>
+        </div>
+        <!-- 树形竖线（非最后一个节点） -->
+        <div v-if="idx < mainChain.length - 1" style="display: flex; justify-content: center">
+          <i
+            style="border-left: 2px solid #eee; height: 12px; margin: auto; display: inline-block"
+          ></i>
+        </div>
       </div>
     </aside>
     <!-- 主体 -->
@@ -86,6 +150,19 @@
                       :disabled="userInput[rowIndex][colIndex] !== ''"
                       :class="{ error: errorCells[rowIndex][colIndex] }"
                     />
+                    <button
+                      v-if="
+                        activeCell &&
+                        rowIndex === activeCell.row &&
+                        colIndex === activeCell.col &&
+                        userInput[rowIndex][colIndex] === '' &&
+                        possibleValues[rowIndex][colIndex]?.size > 1
+                      "
+                      class="explode-btn"
+                      @click="onExplode"
+                    >
+                      💥
+                    </button>
                   </template>
                 </template>
                 <span v-else>{{ originBoard[rowIndex][colIndex] }}</span>
@@ -107,7 +184,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, computed, watch } from 'vue'
+import { ref, onMounted, computed, watch, defineEmits } from 'vue'
 
 const loading = ref(true)
 const originBoard = ref<number[][]>([]) // 初始题面
@@ -120,6 +197,11 @@ const activeCell = ref<{ row: number; col: number } | null>(null)
 const waitingForNext = ref(false)
 const nextResolvers: (() => void)[] = []
 const combo = ref(true)
+
+const mainChain = ref<MoveNode[]>([])
+const mainChainSet = computed(() => new Set(mainChain.value))
+
+const emit = defineEmits(['success'])
 
 function updatePossibleValues() {
   const newPossible: Set<number>[][] = Array.from({ length: 9 }, (_, row) =>
@@ -278,6 +360,7 @@ async function asyncCheck(centerRow: number, centerCol: number, val: number) {
       console.error('冲突', r, c, pointerVal, val)
       errorCells.value[centerRow][centerCol] = true
       errorCells.value[r][c] = true
+      failCurrentAndBacktrack()
       return
     }
     if (!userBoard.value[r][c]) {
@@ -286,6 +369,7 @@ async function asyncCheck(centerRow: number, centerCol: number, val: number) {
         console.error('无解', r, c)
         errorCells.value[centerRow][centerCol] = true
         errorCells.value[r][c] = true
+        failCurrentAndBacktrack()
         return
       }
       if (possibleValues.value[r][c].size === 1) {
@@ -361,16 +445,30 @@ function onInput(row: number, col: number) {
     return
   }
   activeCell.value = null
-  userBoard.value[row][col] = parseInt(val)
-  asyncCheck(row, col, parseInt(val))
+  const n = parseInt(val)
+  setNumber(row, col, n)
 }
 
+function setNumber(row: number, col: number, val: number) {
+  userBoard.value[row][col] = val
+  asyncCheck(row, col, val)
+}
+
+let blurTimeout: NodeJS.Timeout | null = null
 function onFocus(row: number, col: number) {
+  if (blurTimeout) {
+    clearTimeout(blurTimeout)
+  }
   activeCell.value = { row, col }
 }
 
 function onBlur() {
-  activeCell.value = null
+  if (blurTimeout) {
+    clearTimeout(blurTimeout)
+  }
+  blurTimeout = setTimeout(() => {
+    activeCell.value = null
+  }, 200)
 }
 
 function onFillUnique(row: number, col: number) {
@@ -380,8 +478,7 @@ function onFillUnique(row: number, col: number) {
   // 取唯一解
   const val = Array.from(possibleValues.value[row][col])[0]
   userInput.value[row][col] = String(val)
-  userBoard.value[row][col] = val
-  asyncCheck(row, col, val)
+  setNumber(row, col, val)
 }
 
 type MoveNode = {
@@ -390,30 +487,26 @@ type MoveNode = {
     userInput: string[][]
     errorCells: boolean[][]
   }
-  prev: MoveNode | null
-  next: MoveNode | null
+  parent: MoveNode | null
+  children: MoveNode[]
+  branchInfo?: { row: number; col: number; value: number }
+  childIndex?: number
+  status?: 'failed' | 'exploring' | 'unexplored' | 'success'
 }
-const moveHead = ref<MoveNode | null>(null)
+const moveRoot = ref<MoveNode | null>(null)
 const currentMove = ref<MoveNode | null>(null)
-const moveHistoryList = computed(() => {
-  const list: MoveNode[] = []
-  let node = moveHead.value
-  while (node) {
-    list.push(node)
-    node = node.next
-  }
-  return list
-})
 const moveIndex = computed(() => {
   let idx = 0
-  let node = moveHead.value
+  let node = moveRoot.value
   while (node && node !== currentMove.value) {
-    node = node.next
+    node = node.children[0]
     idx++
   }
   return node ? idx : -1
 })
 function pushMoveSnapshot() {
+  console.log('pushMoveSnapshot before', currentMove.value)
+
   const snapshot = {
     userBoard: userBoard.value.map((row) => [...row]),
     userInput: userInput.value.map((row) => [...row]),
@@ -421,44 +514,91 @@ function pushMoveSnapshot() {
   }
   const newNode: MoveNode = {
     snapshot,
-    prev: currentMove.value,
-    next: null,
+    parent: currentMove.value,
+    children: [],
   }
   if (currentMove.value) {
-    currentMove.value.next = newNode
+    currentMove.value.children = [newNode]
   } else {
-    moveHead.value = newNode
+    moveRoot.value = newNode
   }
   currentMove.value = newNode
+  updateMainChain()
+  console.log('pushMoveSnapshot', currentMove.value)
+
+  if (isBoardSuccess()) {
+    successAndBacktrack(currentMove.value)
+    emit('success')
+  }
 }
 
-function restoreMove(node: MoveNode) {
+function restoreMove(_node: MoveNode, goDeep = false) {
+  // 找到第一个非失败的分叉/叶子节点
+  let node = _node
+  if (goDeep) {
+    while (node.status !== 'failed' && node.children.length === 1) {
+      node = node.children[0]
+    }
+  }
+
   userBoard.value = node.snapshot.userBoard.map((row) => [...row])
   userInput.value = node.snapshot.userInput.map((row) => [...row])
   errorCells.value = node.snapshot.errorCells.map((row) => [...row])
   updatePossibleValues()
   currentMove.value = node
+  updateMainChain()
+
+  if (node.status === 'failed' || node.status === 'success') {
+    return
+  }
+
+  // 更新分支状态
+  if (node.parent) {
+    node.parent.children.forEach((child) => {
+      if (child === node) {
+        child.status = 'exploring'
+      } else if (child.status !== 'failed') {
+        child.status = 'unexplored'
+      }
+    })
+  }
+
+  // 自动 fail 检查
+  let hasImpossible = false
+  for (let r = 0; r < 9; r++) {
+    for (let c = 0; c < 9; c++) {
+      if (node.snapshot.userBoard[r][c] === 0 && possibleValues.value[r][c]?.size === 0) {
+        hasImpossible = true
+        break
+      }
+    }
+    if (hasImpossible) break
+  }
+  if (hasImpossible) {
+    node.status = 'failed'
+    failCurrentAndBacktrack()
+  }
 }
 
 function jumpToStep(idx: number) {
-  let node = moveHead.value
+  let node = moveRoot.value
   let i = 0
   while (node && i < idx) {
-    node = node.next
+    node = node.children[0]
     i++
   }
   if (node) restoreMove(node)
 }
 
 function undo() {
-  if (currentMove.value && currentMove.value.prev) {
-    restoreMove(currentMove.value.prev)
+  if (currentMove.value && currentMove.value.parent) {
+    restoreMove(currentMove.value.parent)
   }
 }
 
 function redo() {
-  if (currentMove.value && currentMove.value.next) {
-    restoreMove(currentMove.value.next)
+  if (currentMove.value && currentMove.value.children.length > 0) {
+    restoreMove(currentMove.value.children[0])
   }
 }
 
@@ -470,9 +610,120 @@ function initBoards(puzzle: number[][]) {
   highlightCells.value = Array.from({ length: 9 }, () => Array(9).fill(0))
   updatePossibleValues()
   // 重置链表头和当前指针
-  moveHead.value = null
+  moveRoot.value = null
   currentMove.value = null
   pushMoveSnapshot()
+}
+
+function updateMainChain() {
+  let chain: MoveNode[] = []
+  let node = currentMove.value
+  // 先回溯到根节点
+  while (node) {
+    chain.push(node)
+    node = node.parent
+  }
+
+  // 从根节点向下，按分支规则走主链
+  node = chain[0]
+  chain = chain.slice(1).reverse()
+
+  while (node) {
+    chain.push(node)
+    if (node.children.length > 1) {
+      // 找第一个未失败的分支
+      const next: MoveNode | undefined = node.children.find((child) => child.status !== 'failed')
+      if (next) {
+        node = next
+      } else {
+        break // 全失败，停止
+      }
+    } else if (node.children.length === 1) {
+      node = node.children[0]
+    } else {
+      break
+    }
+  }
+  mainChain.value = chain
+}
+
+function failCurrentAndBacktrack() {
+  console.log('failCurrentAndBacktrack', currentMove.value)
+  pushMoveSnapshot()
+
+  let node = currentMove.value
+  if (!node) return
+  node.status = 'failed'
+
+  while (node?.parent) {
+    const parent: MoveNode = node.parent
+    const allFailed = parent.children.every((child) => child.status === 'failed')
+    if (allFailed) {
+      parent.status = 'failed'
+      node = parent
+    } else {
+      // const next = parent.children.find((child) => child.status !== 'failed')
+      // if (next) {
+      //   restoreMove(next)
+      // }
+      return
+    }
+  }
+  // 如果回溯到根节点且全部 fail，可以提示"无解"
+}
+
+function onExplode() {
+  if (!activeCell.value || !currentMove.value) return
+  console.log('onExplode', activeCell.value, currentMove.value)
+  const { row, col } = activeCell.value
+  const pv = possibleValues.value[row][col]
+  if (!pv || pv.size <= 1) return
+
+  // 清空原有分支
+  currentMove.value.children = []
+
+  let idx = 0
+  for (const v of pv) {
+    // 复制当前快照
+    const newUserBoard = currentMove.value.snapshot.userBoard.map((row) => [...row])
+    const newUserInput = currentMove.value.snapshot.userInput.map((row) => [...row])
+    const newErrorCells = currentMove.value.snapshot.errorCells.map((row) => [...row])
+    newUserBoard[row][col] = v
+    newUserInput[row][col] = String(v)
+    const newNode: MoveNode = {
+      snapshot: {
+        userBoard: newUserBoard,
+        userInput: newUserInput,
+        errorCells: newErrorCells,
+      },
+      parent: currentMove.value,
+      children: [],
+      branchInfo: { row, col, value: v },
+      childIndex: idx,
+      status: 'unexplored',
+    }
+    currentMove.value.children.push(newNode)
+    idx++
+  }
+  if (currentMove.value.children.length > 0) {
+    restoreMove(currentMove.value.children[0])
+  }
+}
+
+function successAndBacktrack(node: MoveNode | null) {
+  // 自下而上标记 success
+  while (node) {
+    node.status = 'success'
+    if (node.parent) {
+      node = node.parent
+    } else {
+      break
+    }
+  }
+}
+
+function isBoardSuccess() {
+  return !hasError.value && userBoard.value.every((row) => row.every((cell) => cell !== 0))
 }
 
 onMounted(async () => {
@@ -513,6 +764,7 @@ onMounted(async () => {
   max-width: 434px;
   min-width: 434px;
   font-size: 20px;
+  user-select: none;
 }
 .sudoku-board td {
   border: 1px solid #aaa;
@@ -539,7 +791,7 @@ onMounted(async () => {
 }
 .sudoku-board .error {
   background: #ffcccc !important;
-  color: #f00 !important;
+  color: #fa5151 !important;
 }
 .sudoku-board span {
   font-weight: bold;
@@ -575,7 +827,7 @@ onMounted(async () => {
   &:after {
     content: '';
     position: absolute;
-    --gap: 4px;
+    --gap: 1px;
     top: var(--gap);
     left: var(--gap);
     bottom: var(--gap);
@@ -637,6 +889,37 @@ onMounted(async () => {
   font-size: 18px;
   &:hover {
     background: #bbdefb;
+  }
+}
+.explode-btn {
+  position: absolute;
+  top: 45%;
+  left: 30%;
+  width: 40%;
+  height: 40%;
+  cursor: pointer;
+  background: #fbdebb;
+  border-radius: 4px;
+  border: 1px solid #f9d59b;
+  font-size: 12px;
+  color: #ccc;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 0 1px 0 0;
+  &:hover {
+    background: #f9d59b;
+  }
+}
+.failed {
+  color: #fa5151;
+  text-decoration: line-through;
+}
+.success {
+  color: #07c160;
+  font-weight: bold;
+  &:after {
+    content: '✅';
   }
 }
 </style>
