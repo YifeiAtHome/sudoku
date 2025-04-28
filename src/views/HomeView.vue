@@ -511,7 +511,7 @@ function setNumber(row: number, col: number, val: number) {
   asyncCheck(row, col, val)
 }
 
-let blurTimeout: NodeJS.Timeout | null = null
+let blurTimeout: ReturnType<typeof setTimeout> | null = null
 function onFocus(row: number, col: number) {
   if (blurTimeout) {
     clearTimeout(blurTimeout)
