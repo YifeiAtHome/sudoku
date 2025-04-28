@@ -1,11 +1,20 @@
 <template>
+  <div style="margin-bottom: 16px">
+    <label for="difficulty">难度：</label>
+    <select id="difficulty" v-model="selectedDifficulty" @change="onDifficultyChange">
+      <option :value="Difficulty.Easy">Easy</option>
+      <option :value="Difficulty.Medium">Medium</option>
+      <option :value="Difficulty.Hard">Hard</option>
+      <option :value="Difficulty.Extreme">Extreme</option>
+    </select>
+  </div>
   <main style="display: flex; flex-direction: row">
     <!-- Step 历史列表 -->
     <aside
       style="
-        width: 120px;
+        width: 140px;
         border-right: 1px solid #eee;
-        padding: 8px 0;
+        padding: 8px;
         max-height: 500px;
         overflow-y: auto;
       "
@@ -36,6 +45,7 @@
                   node.children[0].branchInfo.col + 1
                 }}]
               </span>
+              <span v-else-if="node.children.length < 1 && node.status === 'success'">🎉🎉🎉</span>
               <span
                 v-else
                 :class="{ failed: node.status === 'failed', success: node.status === 'success' }"
@@ -43,7 +53,7 @@
                 Step
               </span>
             </template>
-            <span v-else>{{ node.status === 'success' ? '🎉🎉🎉' : 'Start' }}</span>
+            <span :class="{ success: node.status === 'success' }" v-else>Start</span>
           </span>
           <!-- 横向分支 -->
           <div v-if="node.children.length > 1" style="display: flex; justify-content: center">
@@ -202,6 +212,53 @@ const mainChain = ref<MoveNode[]>([])
 const mainChainSet = computed(() => new Set(mainChain.value))
 
 const emit = defineEmits(['success'])
+
+enum Difficulty {
+  Easy = 'easy',
+  Medium = 'medium',
+  Hard = 'hard',
+  Extreme = 'extreme',
+}
+const selectedDifficulty = ref(Difficulty.Medium)
+
+const puzzles = {
+  [Difficulty.Easy]: {
+    mission: '030490010740018000196700024000501762003027059000040300078900000429000073000370098',
+    solution: '832496517745218936196753824984531762613827459257649381378962145429185673561374298',
+  },
+  [Difficulty.Medium]: {
+    mission: '920510876480000300560328041005089060010000700036140000000031507008900000050000019',
+    solution: '923514876481697325567328941245789163819263754736145298692431587178956432354872619',
+  },
+  [Difficulty.Hard]: {
+    mission: '000019256001700009000054000002000910000000407100040683085000102030006000209003700',
+    solution: '473819256851762349926354871342678915568931427197245683685497132734126598219583764',
+  },
+  [Difficulty.Extreme]: {
+    mission: '090002070000003006001960080400000010000006000030750008000200000070890005003000700',
+    solution: '396582174548173296721964583465328917987416352132759468659237841274891635813645729',
+  },
+}
+
+function loadPuzzleByDifficulty() {
+  const board = puzzles[selectedDifficulty.value].mission
+    .split('')
+    .map((item) => parseInt(item))
+    .reduce((acc, item, index) => {
+      const row = Math.floor(index / 9)
+      const col = index % 9
+      if (!acc[row]) {
+        acc[row] = []
+      }
+      acc[row][col] = item
+      return acc
+    }, [] as number[][])
+  initBoards(board)
+}
+
+function onDifficultyChange() {
+  loadPuzzleByDifficulty()
+}
 
 function updatePossibleValues() {
   const newPossible: Set<number>[][] = Array.from({ length: 9 }, (_, row) =>
@@ -726,34 +783,9 @@ function isBoardSuccess() {
   return !hasError.value && userBoard.value.every((row) => row.every((cell) => cell !== 0))
 }
 
-onMounted(async () => {
+onMounted(() => {
   loading.value = true
-  // 拉取题面
-  // const res = await fetch('https://sudoku.com/api/v2/level/easy')
-  // const data = await res.json()
-  const easy = {
-    mission: '030490010740018000196700024000501762003027059000040300078900000429000073000370098',
-    solution: '832496517745218936196753824984531762613827459257649381378962145429185673561374298',
-  }
-  const extereme = {
-    mission: '090002070000003006001960080400000010000006000030750008000200000070890005003000700',
-    solution: '396582174548173296721964583465328917987416352132759468659237841274891635813645729',
-  }
-  const board = extereme.mission
-    .split('')
-    .map((item) => parseInt(item))
-    .reduce((acc, item, index) => {
-      const row = Math.floor(index / 9)
-      const col = index % 9
-      if (!acc[row]) {
-        acc[row] = []
-      }
-      acc[row][col] = item
-      return acc
-    }, [] as number[][])
-  // 题面在 data.board
-  // 题面是9x9的数组，0表示空
-  initBoards(board)
+  loadPuzzleByDifficulty()
   loading.value = false
 })
 </script>
